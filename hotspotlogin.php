@@ -139,40 +139,78 @@ if ($_GET['res'] == success) {
   $flowLimit = $row['value'];
   // print '<h3> Login at: <span id="loginat">' . $login_at .'</span> </h3>';
   // print '<h3> Access time: <span id="logintime"> 0 </span> / ' . $_GET['timeleft'] . ' seconds </h3>';
-  print '<center><h3> Access time: <span id="logintime2"> accessing... </span> / ' . $_GET['timeleft'] . ' seconds </h3></center>';
-  print '<script> 
-var timecount = 0;
-var time_at =  new Date("' . $login_at . ' +0800");
-var timemax = ' . $_GET["timeleft"] . ';
-var logouturl = "http://' . $_GET['uamip'] . ':' . $_GET['uamport'] . '/logoff" ;
-var timer = setInterval(() => { 
-    if (timecount < 0) { 
-       clearInterval(timer); 
-    } 
-    timecount += 1;
-    /*
-    if (timecount >= timemax) {
-       window.location.href = logouturl;
-       document.getElementById("logintime").innerHTML = "You\'ve been logged out";
-       clearInterval(timer);
-    }
-    */
-    // else document.getElementById("logintime").innerHTML = timecount;
-    let tim = Math.floor((new Date() - time_at) / 1000);
-    // tim = (tim + 3600) % 3600;
-    document.getElementById("logintime2").innerHTML = tim;
+  $safe_uamip   = preg_replace('/[^a-zA-Z0-9\.\-]/', '', $_GET['uamip']);
+  $safe_uamport  = intval($_GET['uamport']);
+  $safe_timeleft = intval($_GET['timeleft']);
+  $uid_js        = json_encode($_GET['uid']);
+  $logouturl_js  = json_encode('http://' . $safe_uamip . ':' . $safe_uamport . '/logoff');
+  $login_at_js   = htmlspecialchars($login_at, ENT_QUOTES);
+
+  print '<center><h3> Access time: <span id="logintime2"> accessing... </span> / ' . $safe_timeleft . ' seconds </h3></center>';
+  print '<script>
+var username   = ' . $uid_js . ';
+var timecount  = 0;
+var time_at    = new Date("' . $login_at_js . ' +0800");
+var timemax    = ' . $safe_timeleft . ';  // remaining seconds from ChilliSpot
+var logouturl  = ' . $logouturl_js . ';
+
+// Poll server for current traffic; kick user if limit exceeded
+function checkTraffic() {
+  fetch("check_status.php?username=" + encodeURIComponent(username))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (typeof data.traffic !== "undefined") {
+        document.getElementById("logintraffic").innerHTML = data.traffic;
+        if (data.traffic_limit > 0 && data.traffic >= data.traffic_limit) {
+          clearInterval(timer);
+          document.getElementById("logintraffic").innerHTML =
+            data.traffic + " (已達上限，即將登出...）";
+          window.location.href = logouturl;
+        }
+      }
+    })
+    .catch(function() {});
+}
+
+var timer = setInterval(function() {
+  timecount += 1;
+
+  // Time-based kick: redirect to logout when session time is up
+  if (timemax > 0 && timecount >= timemax) {
+    clearInterval(timer);
+    document.getElementById("logintime2").innerHTML = "時間到，即將登出...";
+    window.location.href = logouturl;
+    return;
+  }
+
+  var tim = Math.floor((new Date() - time_at) / 1000);
+  document.getElementById("logintime2").innerHTML = tim;
+
+  // Traffic-based kick: poll every 10 seconds
+  if (timecount % 10 === 0) {
+    checkTraffic();
+  }
 }, 1000);
 </script>';
 
-  # Show traffic quota
-  # $sql = "SELECT id FROM radgroupreply WHERE attribute = 'ChilliSpot-Max-Total-Octets'";
+  # Show traffic quota — group default, then override with per-user limit if set
   $sql = "SELECT value FROM radgroupreply WHERE attribute = 'ChilliSpot-Max-Total-Octets'";
-  $result = mysqli_query($db,$sql);
-  $row = mysqli_fetch_array($result,MYSQLI_ASSOC);
-  $flowLimit = $row['value'];
+  $result = mysqli_query($db, $sql);
+  $row = mysqli_fetch_array($result, MYSQLI_ASSOC);
+  $flowLimit = $row['value'] ?? 0;
 
-  print '<center><h3> Traffic : <span id="logintraffic">' . $flow . '  </span> / ' .  $flowLimit .  ' bytes </h3></center>';
-  // print $db;
+  # Per-user traffic limit in radreply takes precedence over group limit
+  $uid_escaped = mysqli_real_escape_string($db, $_GET['uid']);
+  $sql = "SELECT value FROM radreply
+          WHERE username='$uid_escaped'
+            AND attribute='ChilliSpot-Max-Total-Octets'
+          LIMIT 1";
+  $res_personal = mysqli_query($db, $sql);
+  if ($res_personal && $row_personal = mysqli_fetch_assoc($res_personal)) {
+    $flowLimit = $row_personal['value'];
+  }
+
+  print '<center><h3> Traffic : <span id="logintraffic">' . $flow . '</span> / ' . intval($flowLimit) . ' bytes </h3></center>';
 
   
 
