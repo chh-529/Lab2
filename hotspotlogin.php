@@ -6,7 +6,7 @@
 # this is forked from original chillispot.org's hotspotlogin.cgi by Kanne
 # uamsecret enabled by Cedric
 
-include("config.php");
+// include("config.php");
 
 
 # Shared secret used to encrypt challenge with. Prevents dictionary attacks.

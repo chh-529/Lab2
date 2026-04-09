@@ -1,6 +1,10 @@
 <?php
-   include("config.php");
+//    include("config.php");
    session_start();
+
+   // 預設值（避免未定義變數警告）
+   $error = '';
+   $log   = '';
 
    function get_milliseconds()
    {

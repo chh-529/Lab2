@@ -3,7 +3,7 @@
  * admin.php
  * HotSpot 管理者介面：流量監測 & 流量/時間控管
  */
-include("config.php");
+// include("config.php");  // 預覽模式：暫時關閉 DB 連線
 session_start();
 
 // ── 管理者密碼（請自行修改） ────────────────────────────────
@@ -121,45 +121,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
 // 查詢資料
 // ════════════════════════════════════════════════════════════
 
-// 所有已註冊使用者
-$users = [];
-$res = mysqli_query($db, "SELECT username FROM radcheck
-                          WHERE attribute='Cleartext-Password'
-                          ORDER BY username");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $users[] = $r['username'];
+// // 所有已註冊使用者
+// $users = [];
+// $res = mysqli_query($db, "SELECT username FROM radcheck
+//                           WHERE attribute='Cleartext-Password'
+//                           ORDER BY username");
+// if ($res) while ($r = mysqli_fetch_assoc($res)) $users[] = $r['username'];
 
-// 每位使用者的累計流量與使用時間
-$acct = [];
-$res = mysqli_query($db, "SELECT username,
-                                  SUM(acctinputoctets + acctoutputoctets) AS total_traffic,
-                                  SUM(acctsessiontime) AS total_time
-                           FROM radacct
-                           GROUP BY username");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $acct[$r['username']] = $r;
+// // 每位使用者的累計流量與使用時間
+// $acct = [];
+// $res = mysqli_query($db, "SELECT username,
+//                                   SUM(acctinputoctets + acctoutputoctets) AS total_traffic,
+//                                   SUM(acctsessiontime) AS total_time
+//                            FROM radacct
+//                            GROUP BY username");
+// if ($res) while ($r = mysqli_fetch_assoc($res)) $acct[$r['username']] = $r;
 
-// 個人限制（radreply）
-$ulimits = [];
-$res = mysqli_query($db, "SELECT username, attribute, value FROM radreply
-                          WHERE attribute IN
-                                ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
-if ($res) while ($r = mysqli_fetch_assoc($res))
-    $ulimits[$r['username']][$r['attribute']] = $r['value'];
+// // 個人限制（radreply）
+// $ulimits = [];
+// $res = mysqli_query($db, "SELECT username, attribute, value FROM radreply
+//                           WHERE attribute IN
+//                                 ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
+// if ($res) while ($r = mysqli_fetch_assoc($res))
+//     $ulimits[$r['username']][$r['attribute']] = $r['value'];
 
-// 群組預設限制（radgroupreply）
-$glimits = [];
-$res = mysqli_query($db, "SELECT attribute, value FROM radgroupreply
-                          WHERE attribute IN
-                                ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $glimits[$r['attribute']] = $r['value'];
+// // 群組預設限制（radgroupreply）
+// $glimits = [];
+// $res = mysqli_query($db, "SELECT attribute, value FROM radgroupreply
+//                           WHERE attribute IN
+//                                 ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
+// if ($res) while ($r = mysqli_fetch_assoc($res)) $glimits[$r['attribute']] = $r['value'];
 
-// 目前線上使用者（acctstoptime 為 NULL）
-$online = [];
-$res = mysqli_query($db, "SELECT username, framedipaddress, acctstarttime,
-                                  acctinputoctets + acctoutputoctets AS traffic
-                           FROM radacct
-                           WHERE acctstoptime IS NULL
-                           ORDER BY acctstarttime DESC");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $online[] = $r;
+// // 目前線上使用者（acctstoptime 為 NULL）
+// $online = [];
+// $res = mysqli_query($db, "SELECT username, framedipaddress, acctstarttime,
+//                                   acctinputoctets + acctoutputoctets AS traffic
+//                            FROM radacct
+//                            WHERE acctstoptime IS NULL
+//                            ORDER BY acctstarttime DESC");
+// if ($res) while ($r = mysqli_fetch_assoc($res)) $online[] = $r;
+
+// ════════════════════════════════════════════════════════════
+// 假資料（預覽前端用，正式部署時恢復 DB 查詢）
+// ════════════════════════════════════════════════════════════
+$users = ['alice', 'bob', 'charlie'];
+
+$acct = [
+    'alice'   => ['total_traffic' => 52428800,  'total_time' => 3612],
+    'bob'     => ['total_traffic' => 104857600, 'total_time' => 7234],
+    'charlie' => ['total_traffic' => 1048576,   'total_time' => 310],
+];
+
+$ulimits = [
+    'alice' => [
+        'ChilliSpot-Max-Total-Octets' => '209715200',  // 200 MB 個人上限
+        'Session-Timeout'             => '7200',        // 2 小時個人上限
+    ],
+];
+
+$glimits = [
+    'ChilliSpot-Max-Total-Octets' => '104857600',  // 100 MB 群組預設
+    'Session-Timeout'             => '3600',        // 1 小時群組預設
+];
+
+$online = [
+    [
+        'username'        => 'alice',
+        'framedipaddress' => '192.168.1.101',
+        'acctstarttime'   => date('Y-m-d H:i:s', time() - 1800),
+        'traffic'         => 52428800,
+    ],
+];
 
 // ── 工具函式 ───────────────────────────────────────────────
 function fmt_bytes(int $b): string {
