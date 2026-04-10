@@ -1,5 +1,5 @@
 <?php
-//    include("config.php");
+   include("config.php");
    session_start();
 
    // Default values (prevent undefined-variable warnings in preview mode)

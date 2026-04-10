@@ -3,7 +3,7 @@
  * admin.php
  * HotSpot Admin Dashboard — traffic monitoring & per-user quota control
  */
-// include("config.php");  // Preview mode: DB connection disabled
+include("config.php");  // Commented -> Preview mode: DB connection disabled
 session_start();
 
 // ── Admin password (change before production deployment) ─────
@@ -153,81 +153,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
 }
 
 // ════════════════════════════════════════════════════════════
-// 查詢資料
+// Fetch data for dashboard display
 // ════════════════════════════════════════════════════════════
 
-// // All registered users
-// $users = [];
-// $res = mysqli_query($db, "SELECT username FROM radcheck
-//                           WHERE attribute='Cleartext-Password'
-//                           ORDER BY username");
-// if ($res) while ($r = mysqli_fetch_assoc($res)) $users[] = $r['username'];
+// All registered users
+$users = [];
+$res = mysqli_query($db, "SELECT username FROM radcheck
+                          WHERE attribute='Cleartext-Password'
+                          ORDER BY username");
+if ($res) while ($r = mysqli_fetch_assoc($res)) $users[] = $r['username'];
 
-// // Cumulative traffic and session time per user
-// $acct = [];
-// $res = mysqli_query($db, "SELECT username,
-//                                   SUM(acctinputoctets + acctoutputoctets) AS total_traffic,
-//                                   SUM(acctsessiontime) AS total_time
-//                            FROM radacct
-//                            GROUP BY username");
-// if ($res) while ($r = mysqli_fetch_assoc($res)) $acct[$r['username']] = $r;
+// Cumulative traffic and session time per user
+$acct = [];
+$res = mysqli_query($db, "SELECT username,
+                                  SUM(acctinputoctets + acctoutputoctets) AS total_traffic,
+                                  SUM(acctsessiontime) AS total_time
+                           FROM radacct
+                           GROUP BY username");
+if ($res) while ($r = mysqli_fetch_assoc($res)) $acct[$r['username']] = $r;
 
-// // Per-user quota overrides (radreply)
-// $ulimits = [];
-// $res = mysqli_query($db, "SELECT username, attribute, value FROM radreply
-//                           WHERE attribute IN
-//                                 ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
-// if ($res) while ($r = mysqli_fetch_assoc($res))
-//     $ulimits[$r['username']][$r['attribute']] = $r['value'];
+// Per-user quota overrides (radreply)
+$ulimits = [];
+$res = mysqli_query($db, "SELECT username, attribute, value FROM radreply
+                          WHERE attribute IN
+                                ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
+if ($res) while ($r = mysqli_fetch_assoc($res))
+    $ulimits[$r['username']][$r['attribute']] = $r['value'];
 
-// // Group-level default limits (radgroupreply)
-// $glimits = [];
-// $res = mysqli_query($db, "SELECT attribute, value FROM radgroupreply
-//                           WHERE attribute IN
-//                                 ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
-// if ($res) while ($r = mysqli_fetch_assoc($res)) $glimits[$r['attribute']] = $r['value'];
+// Group-level default limits (radgroupreply)
+$glimits = [];
+$res = mysqli_query($db, "SELECT attribute, value FROM radgroupreply
+                          WHERE attribute IN
+                                ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
+if ($res) while ($r = mysqli_fetch_assoc($res)) $glimits[$r['attribute']] = $r['value'];
 
-// // Currently online sessions (acctstoptime IS NULL)
-// $online = [];
-// $res = mysqli_query($db, "SELECT username, framedipaddress, acctstarttime,
-//                                   acctinputoctets + acctoutputoctets AS traffic
-//                            FROM radacct
-//                            WHERE acctstoptime IS NULL
-//                            ORDER BY acctstarttime DESC");
-// if ($res) while ($r = mysqli_fetch_assoc($res)) $online[] = $r;
+// Currently online sessions (acctstoptime IS NULL)
+$online = [];
+$res = mysqli_query($db, "SELECT username, framedipaddress, acctstarttime,
+                                  acctinputoctets + acctoutputoctets AS traffic
+                           FROM radacct
+                           WHERE acctstoptime IS NULL
+                           ORDER BY acctstarttime DESC");
+if ($res) while ($r = mysqli_fetch_assoc($res)) $online[] = $r;
 
 // ════════════════════════════════════════════════════════════
 // Mock data for UI preview
 // To restore live data: uncomment the DB queries above and remove this block.
 // ════════════════════════════════════════════════════════════
-$users = ['alice', 'bob', 'charlie'];
+// $users = ['alice', 'bob', 'charlie'];
 
-$acct = [
-    'alice'   => ['total_traffic' => 52428800,  'total_time' => 3612],
-    'bob'     => ['total_traffic' => 104857600, 'total_time' => 7234],
-    'charlie' => ['total_traffic' => 1048576,   'total_time' => 310],
-];
+// $acct = [
+//     'alice'   => ['total_traffic' => 52428800,  'total_time' => 3612],
+//     'bob'     => ['total_traffic' => 104857600, 'total_time' => 7234],
+//     'charlie' => ['total_traffic' => 1048576,   'total_time' => 310],
+// ];
 
-$ulimits = [
-    'alice' => [
-        'ChilliSpot-Max-Total-Octets' => '209715200',  // personal limit: 200 MB
-        'Session-Timeout'             => '7200',        // personal limit: 2 hours
-    ],
-];
+// $ulimits = [
+//     'alice' => [
+//         'ChilliSpot-Max-Total-Octets' => '209715200',  // personal limit: 200 MB
+//         'Session-Timeout'             => '7200',        // personal limit: 2 hours
+//     ],
+// ];
 
-$glimits = [
-    'ChilliSpot-Max-Total-Octets' => '104857600',  // group default: 100 MB
-    'Session-Timeout'             => '3600',        // group default: 1 hour
-];
+// $glimits = [
+//     'ChilliSpot-Max-Total-Octets' => '104857600',  // group default: 100 MB
+//     'Session-Timeout'             => '3600',        // group default: 1 hour
+// ];
 
-$online = [
-    [
-        'username'        => 'alice',
-        'framedipaddress' => '192.168.1.101',
-        'acctstarttime'   => date('Y-m-d H:i:s', time() - 1800),
-        'traffic'         => 52428800,
-    ],
-];
+// $online = [
+//     [
+//         'username'        => 'alice',
+//         'framedipaddress' => '192.168.1.101',
+//         'acctstarttime'   => date('Y-m-d H:i:s', time() - 1800),
+//         'traffic'         => 52428800,
+//     ],
+// ];
 
 // ── Helper functions ───────────────────────────────────────────
 function fmt_bytes(int $b): string {
