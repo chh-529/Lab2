@@ -59,9 +59,16 @@ $titel = '';
 $headline = '';
 $bodytext = '';
 $body_onload = '';
+// Pass ChilliSpot params to register.php so it can build a "Back to Login" link
+$_reg_qs = http_build_query([
+    'challenge' => $_GET['challenge'] ?? '',
+    'uamip'     => $_GET['uamip']     ?? '',
+    'uamport'   => $_GET['uamport']   ?? '',
+    'userurl'   => $_GET['userurl']   ?? '',
+]);
 $footer_text = '<center>
-                  <a href="register.php">[register]</a> 
-                  <a href="http://www.example.de/rules.php">[terms and conditions]</a>  
+                  <a href="register.php?' . $_reg_qs . '">[register]</a>
+                  <a href="http://www.example.de/rules.php">[terms and conditions]</a>
                 </center>';
 
 # attempt to login

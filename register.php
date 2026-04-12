@@ -17,23 +17,51 @@
          // Preview mode: DB not connected, skip registration logic
          $log = '[Preview] Registration skipped — no database connection.';
       } else {
-         // username and password sent from form
-         $myusername = mysqli_real_escape_string($db, $_POST['username']);
+         // Sanitise inputs
+         $myusername = mysqli_real_escape_string($db, trim($_POST['username']));
          $mypassword = mysqli_real_escape_string($db, $_POST['password']);
 
-         # if($_POST["command"] == "Back to Login Page"){
-         #    $previous = "javascript:history.go(-2)";
-         #    header("Location:" . "https://192.168.182.1:3990");
-         # }
-         if($_POST["command"] == "Register"){
-            $sql = "insert into radcheck (username, attribute, op, value) values ('$myusername', 'Cleartext-Password',':=', '$mypassword')";
-            mysqli_query($db, $sql);
-            $sql = "insert into radusergroup (username, groupname) values ('$myusername', 'user')";
-            mysqli_query($db, $sql);
-            $log = "Register Successfully!!!";
+         if ($myusername === '' || $mypassword === '') {
+            $error = 'Username and password cannot be empty.';
+         } elseif ($_POST["command"] == "Register") {
+            // Check for duplicate username before inserting
+            $dup = mysqli_query($db, "SELECT COUNT(*) AS cnt FROM radcheck
+                                      WHERE username = '$myusername'");
+            $dup_row = mysqli_fetch_assoc($dup);
+
+            if ($dup_row && $dup_row['cnt'] > 0) {
+               $error = "Username \"$myusername\" is already taken. Please choose another.";
+            } else {
+               // Detect which group existing accounts use (fallback: 'user')
+               $grp_res = mysqli_query($db, "SELECT groupname FROM radusergroup LIMIT 1");
+               $grp_row = mysqli_fetch_assoc($grp_res);
+               $groupname = $grp_row['groupname'] ?? 'user';
+
+               $ok1 = mysqli_query($db,
+                  "INSERT INTO radcheck (username, attribute, op, value)
+                   VALUES ('$myusername', 'Cleartext-Password', ':=', '$mypassword')");
+               $ok2 = $ok1 ? mysqli_query($db,
+                  "INSERT INTO radusergroup (username, groupname)
+                   VALUES ('$myusername', '$groupname')") : false;
+
+               if ($ok1 && $ok2) {
+                  $log = "Account \"$myusername\" created! You can now sign in.";
+               } else {
+                  $error = 'Registration failed: ' . mysqli_error($db);
+               }
+            }
          }
       }
    }
+
+   // Build "Back to Login" URL using params passed from hotspotlogin.php
+   $uamip    = preg_replace('/[^a-zA-Z0-9.\-]/', '', $_GET['uamip']    ?? '');
+   $uamport  = intval($_GET['uamport'] ?? 0);
+   $userurl  = htmlspecialchars($_GET['userurl'] ?? '', ENT_QUOTES);
+   // /prelogin asks ChilliSpot for a fresh challenge → cleanest re-entry point
+   $login_url = ($uamip && $uamport)
+       ? 'http://' . $uamip . ':' . $uamport . '/prelogin'
+       : '';
 ?>
 
 
@@ -90,6 +118,14 @@
     input[type=submit]:hover { opacity: .88; }
     .msg-error   { color: #ff7090; font-size: 13px; text-align: center; margin-top: 14px; }
     .msg-success { color: #6fcf97; font-size: 13px; text-align: center; margin-top: 14px; font-weight: 600; }
+    .btn-back {
+      display: block; text-align: center; margin-top: 16px;
+      padding: 10px; border-radius: 10px;
+      background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.15);
+      color: #e2e8f0; font-size: 14px; font-weight: 600; text-decoration: none;
+      transition: background .2s;
+    }
+    .btn-back:hover { background: rgba(255,255,255,0.15); }
   </style>
 </head>
 <body>
@@ -115,6 +151,9 @@
     <?php endif; ?>
     <?php if ($log !== ''): ?>
       <p class="msg-success">✅ <?php echo htmlspecialchars($log); ?></p>
+      <?php if ($login_url !== ''): ?>
+        <a href="<?= htmlspecialchars($login_url) ?>" class="btn-back">← Back to Login</a>
+      <?php endif; ?>
     <?php endif; ?>
   </div>
 </body>
