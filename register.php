@@ -23,7 +23,7 @@
 
          if ($myusername === '' || $mypassword === '') {
             $error = 'Username and password cannot be empty.';
-         } elseif ($_POST["command"] == "Register") {
+         } elseif (isset($_POST['command'])) {  // any submit from the register form
             // Check for duplicate username before inserting
             $dup = mysqli_query($db, "SELECT COUNT(*) AS cnt FROM radcheck
                                       WHERE username = '$myusername'");
@@ -55,9 +55,10 @@
    }
 
    // Build "Back to Login" URL using params passed from hotspotlogin.php
-   $uamip    = preg_replace('/[^a-zA-Z0-9.\-]/', '', $_GET['uamip']    ?? '');
-   $uamport  = intval($_GET['uamport'] ?? 0);
-   $userurl  = htmlspecialchars($_GET['userurl'] ?? '', ENT_QUOTES);
+   // Check GET first (direct link), then POST hidden fields (after form submit)
+   $uamip   = preg_replace('/[^a-zA-Z0-9.\-]/', '', $_GET['uamip']    ?? $_POST['_uamip']   ?? '');
+   $uamport = intval($_GET['uamport'] ?? $_POST['_uamport'] ?? 0);
+   $userurl  = htmlspecialchars($_GET['userurl'] ?? $_POST['_userurl'] ?? '', ENT_QUOTES);
    // /prelogin asks ChilliSpot for a fresh challenge → cleanest re-entry point
    $login_url = ($uamip && $uamport)
        ? 'http://' . $uamip . ':' . $uamport . '/prelogin'
@@ -135,6 +136,10 @@
     <p class="subtitle">Register to access the HotSpot network</p>
 
     <form action="" method="post">
+      <!-- Preserve ChilliSpot GET params so $login_url is available after submit -->
+      <input type="hidden" name="_uamip"   value="<?= htmlspecialchars($uamip) ?>">
+      <input type="hidden" name="_uamport" value="<?= htmlspecialchars($uamport) ?>">
+      <input type="hidden" name="_userurl" value="<?= $userurl ?>">
       <div class="form-group">
         <label>Username</label>
         <input type="text" name="username" placeholder="Enter username" autocomplete="username">
