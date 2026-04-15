@@ -3,7 +3,7 @@
  * admin.php
  * HotSpot Admin Dashboard — traffic monitoring & per-user quota control
  */
-include("config.php");  // Commented -> Preview mode: DB connection disabled
+include("config.php");  // Sets $db; if connection fails $db === false → mock data kicks in
 session_start();
 
 // ── Admin password (change before production deployment) ─────
@@ -104,7 +104,7 @@ $message      = '';
 $message_type = 'success';
 
 // ── Set per-user quota limits ────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_limit'])) {
+if ($db && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_limit'])) {
     $target  = mysqli_real_escape_string($db, $_POST['target_user'] ?? '');
     $t_limit = max(0, intval($_POST['time_limit']    ?? 0));  // seconds
     $f_limit = max(0, intval($_POST['traffic_limit'] ?? 0));  // bytes
@@ -141,7 +141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['set_limit'])) {
 }
 
 // ── Delete a user account ────────────────────────────────────
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
+if ($db && $_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
     $target = mysqli_real_escape_string($db, $_POST['target_user'] ?? '');
     if ($target !== '') {
         mysqli_query($db, "DELETE FROM radcheck     WHERE username='$target'");
@@ -156,78 +156,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['delete_user'])) {
 // Fetch data for dashboard display
 // ════════════════════════════════════════════════════════════
 
-// All registered users
-$users = [];
-$res = mysqli_query($db, "SELECT username FROM radcheck
-                          WHERE attribute='Cleartext-Password'
-                          ORDER BY username");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $users[] = $r['username'];
+if (!isset($db) || $db === false) {
+    // ── Mock data for local preview (no DB) ──────────────────
+    $users = ['alice', 'bob', 'charlie'];
 
-// Cumulative traffic and session time per user
-$acct = [];
-$res = mysqli_query($db, "SELECT username,
-                                  SUM(acctinputoctets + acctoutputoctets) AS total_traffic,
-                                  SUM(acctsessiontime) AS total_time
-                           FROM radacct
-                           GROUP BY username");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $acct[$r['username']] = $r;
+    $acct = [
+        'alice'   => ['total_traffic' => 52428800,  'total_time' => 3612],
+        'bob'     => ['total_traffic' => 104857600, 'total_time' => 7234],
+        'charlie' => ['total_traffic' => 1048576,   'total_time' => 310],
+    ];
 
-// Per-user quota overrides (radreply)
-$ulimits = [];
-$res = mysqli_query($db, "SELECT username, attribute, value FROM radreply
-                          WHERE attribute IN
-                                ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
-if ($res) while ($r = mysqli_fetch_assoc($res))
-    $ulimits[$r['username']][$r['attribute']] = $r['value'];
+    $ulimits = [
+        'alice' => [
+            'ChilliSpot-Max-Total-Octets' => '209715200',  // personal limit: 200 MB
+            'Session-Timeout'             => '7200',        // personal limit: 2 hours
+        ],
+    ];
 
-// Group-level default limits (radgroupreply)
-$glimits = [];
-$res = mysqli_query($db, "SELECT attribute, value FROM radgroupreply
-                          WHERE attribute IN
-                                ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $glimits[$r['attribute']] = $r['value'];
+    $glimits = [
+        'ChilliSpot-Max-Total-Octets' => '104857600',  // group default: 100 MB
+        'Session-Timeout'             => '3600',        // group default: 1 hour
+    ];
 
-// Currently online sessions (acctstoptime IS NULL)
-$online = [];
-$res = mysqli_query($db, "SELECT username, framedipaddress, acctstarttime,
-                                  acctinputoctets + acctoutputoctets AS traffic
-                           FROM radacct
-                           WHERE acctstoptime IS NULL
-                           ORDER BY acctstarttime DESC");
-if ($res) while ($r = mysqli_fetch_assoc($res)) $online[] = $r;
+    $online = [
+        [
+            'username'        => 'alice',
+            'framedipaddress' => '192.168.1.101',
+            'acctstarttime'   => date('Y-m-d H:i:s', time() - 1800),
+            'traffic'         => 52428800,
+        ],
+    ];
+} else {
+    // ── Live data from RADIUS DB ──────────────────────────────
 
-// ════════════════════════════════════════════════════════════
-// Mock data for UI preview
-// To restore live data: uncomment the DB queries above and remove this block.
-// ════════════════════════════════════════════════════════════
-// $users = ['alice', 'bob', 'charlie'];
+    // Currently online sessions (acctstoptime IS NULL)
+    $online = [];
+    $res = mysqli_query($db, "SELECT username, framedipaddress, acctstarttime,
+                                      acctinputoctets + acctoutputoctets AS traffic
+                               FROM radacct
+                               WHERE acctstoptime IS NULL
+                               ORDER BY acctstarttime DESC");
+    if ($res) while ($r = mysqli_fetch_assoc($res)) $online[] = $r;
 
-// $acct = [
-//     'alice'   => ['total_traffic' => 52428800,  'total_time' => 3612],
-//     'bob'     => ['total_traffic' => 104857600, 'total_time' => 7234],
-//     'charlie' => ['total_traffic' => 1048576,   'total_time' => 310],
-// ];
+    // All registered users — UNION ensures every registered user appears
+    $users = [];
+    $res = mysqli_query($db, "SELECT DISTINCT username FROM radusergroup
+                              UNION
+                              SELECT DISTINCT username FROM radcheck
+                                WHERE attribute='Cleartext-Password'
+                              ORDER BY username");
+    if ($res) while ($r = mysqli_fetch_assoc($res)) $users[] = $r['username'];
 
-// $ulimits = [
-//     'alice' => [
-//         'ChilliSpot-Max-Total-Octets' => '209715200',  // personal limit: 200 MB
-//         'Session-Timeout'             => '7200',        // personal limit: 2 hours
-//     ],
-// ];
+    // Ensure every online user also appears in \$users (prevents Online > All Users)
+    foreach (array_column($online, 'username') as $oname) {
+        if (!in_array($oname, $users, true)) $users[] = $oname;
+    }
+    sort($users);
 
-// $glimits = [
-//     'ChilliSpot-Max-Total-Octets' => '104857600',  // group default: 100 MB
-//     'Session-Timeout'             => '3600',        // group default: 1 hour
-// ];
+    // Cumulative traffic and session time per user
+    $acct = [];
+    $res = mysqli_query($db, "SELECT username,
+                                      SUM(acctinputoctets + acctoutputoctets) AS total_traffic,
+                                      SUM(acctsessiontime) AS total_time
+                               FROM radacct
+                               GROUP BY username");
+    if ($res) while ($r = mysqli_fetch_assoc($res)) $acct[$r['username']] = $r;
 
-// $online = [
-//     [
-//         'username'        => 'alice',
-//         'framedipaddress' => '192.168.1.101',
-//         'acctstarttime'   => date('Y-m-d H:i:s', time() - 1800),
-//         'traffic'         => 52428800,
-//     ],
-// ];
+    // Per-user quota overrides (radreply)
+    $ulimits = [];
+    $res = mysqli_query($db, "SELECT username, attribute, value FROM radreply
+                              WHERE attribute IN
+                                    ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
+    if ($res) while ($r = mysqli_fetch_assoc($res))
+        $ulimits[$r['username']][$r['attribute']] = $r['value'];
+
+    // Group-level default limits (radgroupreply)
+    $glimits = [];
+    $res = mysqli_query($db, "SELECT attribute, value FROM radgroupreply
+                              WHERE attribute IN
+                                    ('Session-Timeout','ChilliSpot-Max-Total-Octets')");
+    if ($res) while ($r = mysqli_fetch_assoc($res)) $glimits[$r['attribute']] = $r['value'];
+}
 
 // ── Helper functions ───────────────────────────────────────────
 function fmt_bytes(int $b): string {
@@ -492,20 +501,20 @@ function get_time_limit(string $uname, array $ulimits, array $glimits): array {
             $pct = ($fl['val'] > 0) ? min(100, round(intval($u['traffic']) / $fl['val'] * 100)) : 0;
             $bar = $pct >= 90 ? 'danger' : ($pct >= 70 ? 'warn' : '');
           ?>
-          <tr>
+          <tr data-user="<?= htmlspecialchars($u['username']) ?>">
             <td><strong style="color:#fff"><?= htmlspecialchars($u['username']) ?></strong>
                 <span class="badge online">Online</span></td>
             <td><code style="color:#74b9ff"><?= htmlspecialchars($u['framedipaddress'] ?? '—') ?></code></td>
             <td><?= htmlspecialchars($u['acctstarttime'] ?? '—') ?></td>
             <td>
-              <?= fmt_bytes(intval($u['traffic'])) ?>
+              <span class="live-traffic"><?= fmt_bytes(intval($u['traffic'])) ?></span>
               <?php if ($fl['val'] > 0): ?>
                 <div class="prog-wrap" title="<?= $pct ?>% used">
-                  <div class="prog-bar <?= $bar ?>" style="width:<?= $pct ?>%"></div>
+                  <div class="prog-bar live-bar <?= $bar ?>" style="width:<?= $pct ?>%"></div>
                 </div>
               <?php endif; ?>
             </td>
-            <td><?= $fl['val'] > 0 ? fmt_bytes($fl['val']) . limit_badge($fl['type']) : '<span style="color:rgba(255,255,255,.3)">—</span>' ?></td>
+            <td class="traffic-limit-cell"><?= $fl['val'] > 0 ? fmt_bytes($fl['val']) . limit_badge($fl['type']) : '<span style="color:rgba(255,255,255,.3)">—</span>' ?></td>
             <td><?= $tl['val'] > 0 ? fmt_time($tl['val'])  . limit_badge($tl['type']) : '<span style="color:rgba(255,255,255,.3)">—</span>' ?></td>
           </tr>
           <?php endforeach; ?>
@@ -624,6 +633,47 @@ function get_time_limit(string $uname, array $ulimits, array $glimits): array {
     document.getElementById('set-limit-section')
             .scrollIntoView({ behavior: 'smooth' });
   }
+
+  // Live traffic polling for online users (every 10 seconds)
+  function fmtBytes(b) {
+    b = parseInt(b, 10);
+    if (b >= 1073741824) return (b/1073741824).toFixed(2) + " GB";
+    if (b >= 1048576)    return (b/1048576).toFixed(2)    + " MB";
+    if (b >= 1024)       return (b/1024).toFixed(1)       + " KB";
+    return b + " B";
+  }
+
+  function pollTraffic() {
+    document.querySelectorAll('tr[data-user]').forEach(function(row) {
+      var user = row.getAttribute('data-user');
+      fetch('check_status.php?username=' + encodeURIComponent(user))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (typeof d.traffic === 'undefined') return;
+          var t   = parseInt(d.traffic, 10);
+          var lim = parseInt(d.traffic_limit, 10);
+
+          // Update traffic text
+          var tEl = row.querySelector('.live-traffic');
+          if (tEl) tEl.textContent = fmtBytes(t);
+
+          // Update progress bar
+          var bar = row.querySelector('.live-bar');
+          if (bar && lim > 0) {
+            var pct = Math.min(100, Math.round(t / lim * 100));
+            bar.style.width = pct + '%';
+            bar.className = 'prog-bar live-bar' +
+              (pct >= 90 ? ' danger' : (pct >= 70 ? ' warn' : ''));
+            bar.parentElement.title = pct + '% used';
+          }
+        })
+        .catch(function() {});
+    });
+  }
+
+  // Poll immediately on load, then every 10 seconds
+  pollTraffic();
+  setInterval(pollTraffic, 10000);
 </script>
 </body>
 </html>

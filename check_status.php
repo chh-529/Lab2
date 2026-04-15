@@ -20,6 +20,22 @@ if (!isset($_GET['username']) || $_GET['username'] === '') {
     exit();
 }
 
+// No DB in development mode — return plausible mock data so the UI polling
+// doesn't crash the server with fatal errors.
+if (!$db) {
+    $mock_traffic = [
+        'alice'   => 52428800,
+        'bob'     => 104857600,
+        'charlie' => 1048576,
+    ];
+    $user = $_GET['username'];
+    echo json_encode([
+        'traffic'       => $mock_traffic[$user] ?? 0,
+        'traffic_limit' => 104857600,  // 100 MB group default
+    ]);
+    exit();
+}
+
 $username = mysqli_real_escape_string($db, $_GET['username']);
 
 // Get traffic from the most recent active session in radacct

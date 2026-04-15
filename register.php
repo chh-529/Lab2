@@ -13,7 +13,7 @@
    }
 
    if($_SERVER["REQUEST_METHOD"] == "POST") {
-      if (!isset($db)) {
+      if (!isset($db) || $db === false) {
          // Preview mode: DB not connected, skip registration logic
          $log = '[Preview] Registration skipped — no database connection.';
       } else {

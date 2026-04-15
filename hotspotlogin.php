@@ -72,7 +72,7 @@ $footer_text = '<center>
                 </center>';
 
 # attempt to login
-if ($_GET['login'] == login) {
+if (($_GET['login'] ?? '') == 'login') {
 
   $hexchal = pack ("H32", $_GET['chal']);
 
@@ -105,7 +105,7 @@ if ($_GET['login'] == login) {
 }
 
 # 1: Login successful
-if ($_GET['res'] == success) {
+if ($_GET['res'] == 'success') {
 
   $result = 1;
   $titel = 'Logged in to HotSpot';
@@ -146,107 +146,133 @@ if ($_GET['res'] == success) {
   $flowLimit = $row['value'];
   // print '<h3> Login at: <span id="loginat">' . $login_at .'</span> </h3>';
   // print '<h3> Access time: <span id="logintime"> 0 </span> / ' . $_GET['timeleft'] . ' seconds </h3>';
-  $safe_uamip   = preg_replace('/[^a-zA-Z0-9\.\-]/', '', $_GET['uamip']);
+  // Show success page with live timer and traffic stats
+  $safe_uamip    = preg_replace('/[^a-zA-Z0-9\.\-]/', '', $_GET['uamip']);
   $safe_uamport  = intval($_GET['uamport']);
   $safe_timeleft = intval($_GET['timeleft']);
   $uid_js        = json_encode($_GET['uid']);
   $logouturl_js  = json_encode('http://' . $safe_uamip . ':' . $safe_uamport . '/logoff');
-  $login_at_js   = htmlspecialchars($login_at, ENT_QUOTES);
+  $flow_js       = intval($flow);
+  $flowLimit_js  = intval($flowLimit);
 
-  print '<center><h3> Access time: <span id="logintime2"> accessing... </span> / ' . $safe_timeleft . ' seconds </h3></center>';
-  print '<script>
-var username   = ' . $uid_js . ';
-var timecount  = 0;
-var time_at    = new Date("' . $login_at_js . ' +0800");
-var timemax    = ' . $safe_timeleft . ';  // remaining seconds from ChilliSpot
-var logouturl  = ' . $logouturl_js . ';
+  // Get display-only logout link for the card
+  $logouturl_display = 'http://' . htmlspecialchars($safe_uamip) . ':' . $safe_uamport . '/logoff';
 
-// Poll server for current traffic; kick user if limit exceeded
-function checkTraffic() {
-  fetch("check_status.php?username=" + encodeURIComponent(username))
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      if (typeof data.traffic !== "undefined") {
-        document.getElementById("logintraffic").innerHTML = data.traffic;
-        if (data.traffic_limit > 0 && data.traffic >= data.traffic_limit) {
-          clearInterval(timer);
-          document.getElementById("logintraffic").innerHTML =
-            data.traffic + " (已達上限，即將登出...）";
-          window.location.href = logouturl;
+  print '
+    <div class="hs-logo">✅</div>
+    <div class="hs-title">You are online!</div>
+    <div class="hs-sub">Welcome, ' . htmlspecialchars($_GET['uid'] ?? 'User') . '</div>
+
+    <div class="stat-row">
+      <div>
+        <div class="stat-label">Access Time</div>
+        <div class="stat-val"><span id="hs-time">0s</span></div>
+      </div>
+      <div style="text-align:right">
+        <div class="stat-label">Limit</div>
+        <div class="stat-val">' . ($safe_timeleft > 0 ? $safe_timeleft . 's' : '∞') . '</div>
+      </div>
+    </div>
+
+    <div class="stat-row">
+      <div>
+        <div class="stat-label">Traffic Used</div>
+        <div class="stat-val"><span id="hs-traffic">—</span></div>
+        <div class="prog-wrap"><div class="prog-bar" id="hs-bar" style="width:0%"></div></div>
+      </div>
+      <div style="text-align:right">
+        <div class="stat-label">Limit</div>
+        <div class="stat-val" id="hs-limit">' . ($flowLimit_js > 0 ? round($flowLimit_js/1048576,1).' MB' : '∞') . '</div>
+      </div>
+    </div>
+
+    <a href="' . $logouturl_display . '" class="btn-action btn-logout">Sign Out</a>
+
+  <script>
+  var username    = ' . $uid_js . ';
+  var timecount   = 0;
+  var timemax     = ' . $safe_timeleft . '; // 0 = no limit
+  var logouturl   = ' . $logouturl_js . ';
+  var trafficLim  = ' . $flowLimit_js . '; // bytes, 0 = no limit
+
+  function fmtBytes(b) {
+    if (b >= 1073741824) return (b/1073741824).toFixed(2) + " GB";
+    if (b >= 1048576)    return (b/1048576).toFixed(2)    + " MB";
+    if (b >= 1024)       return (b/1024).toFixed(1)       + " KB";
+    return b + " B";
+  }
+  function fmtTime(s) {
+    var h = Math.floor(s/3600),
+        m = Math.floor((s%3600)/60),
+        ss = s%60;
+    return (h ? h+"h " : "") + (m ? m+"m " : "") + ss + "s";
+  }
+
+  function checkTraffic() {
+    fetch("check_status.php?username=" + encodeURIComponent(username))
+      .then(function(r){ return r.json(); })
+      .then(function(d){
+        if (typeof d.traffic !== "undefined") {
+          var t = parseInt(d.traffic,10);
+          var lim = parseInt(d.traffic_limit,10) || trafficLim;
+          document.getElementById("hs-traffic").textContent = fmtBytes(t);
+          if (lim > 0) {
+            var pct = Math.min(100, Math.round(t/lim*100));
+            var bar = document.getElementById("hs-bar");
+            bar.style.width = pct + "%";
+            bar.className   = "prog-bar" + (pct>=90?" danger":(pct>=70?" warn":""));
+            if (t >= lim) {
+              clearInterval(timer);
+              window.location.href = logouturl;
+            }
+          }
         }
-      }
-    })
-    .catch(function() {});
-}
-
-var timer = setInterval(function() {
-  timecount += 1;
-
-  // Time-based kick: redirect to logout when session time is up
-  if (timemax > 0 && timecount >= timemax) {
-    clearInterval(timer);
-    document.getElementById("logintime2").innerHTML = "時間到，即將登出...";
-    window.location.href = logouturl;
-    return;
+      })
+      .catch(function(){});
   }
 
-  var tim = Math.floor((new Date() - time_at) / 1000);
-  document.getElementById("logintime2").innerHTML = tim;
+  // Fetch traffic immediately on load
+  checkTraffic();
 
-  // Traffic-based kick: poll every 10 seconds
-  if (timecount % 10 === 0) {
-    checkTraffic();
-  }
-}, 1000);
-</script>';
+  var timer = setInterval(function() {
+    timecount++;
+    document.getElementById("hs-time").textContent = fmtTime(timecount);
 
-  # Show traffic quota — group default, then override with per-user limit if set
-  $sql = "SELECT value FROM radgroupreply WHERE attribute = 'ChilliSpot-Max-Total-Octets'";
-  $result = mysqli_query($db, $sql);
-  $row = mysqli_fetch_array($result, MYSQLI_ASSOC);
-  $flowLimit = $row['value'] ?? 0;
+    // Time-based kick
+    if (timemax > 0 && timecount >= timemax) {
+      clearInterval(timer);
+      document.getElementById("hs-time").textContent = "Time\'s up — signing out...";
+      window.location.href = logouturl;
+      return;
+    }
 
-  # Per-user traffic limit in radreply takes precedence over group limit
-  $uid_escaped = mysqli_real_escape_string($db, $_GET['uid']);
-  $sql = "SELECT value FROM radreply
-          WHERE username='$uid_escaped'
-            AND attribute='ChilliSpot-Max-Total-Octets'
-          LIMIT 1";
-  $res_personal = mysqli_query($db, $sql);
-  if ($res_personal && $row_personal = mysqli_fetch_assoc($res_personal)) {
-    $flowLimit = $row_personal['value'];
-  }
+    // Poll traffic every 10 seconds
+    if (timecount % 10 === 0) checkTraffic();
 
-  print '<center><h3> Traffic : <span id="logintraffic">' . $flow . '</span> / ' . intval($flowLimit) . ' bytes </h3></center>';
-
-  
-
+  }, 1000);
+  </script>';
 
   print_footer();
 }
 
 # 2: Login failed
-if ($_GET['res'] == failed) {
+if ($_GET['res'] == 'failed') {
 
   $result = 2;
   $titel = 'HotSpot Login Failed';
-  $headline = 'HotSpot Login Failed';
-  $bodytext = 'Sorry, try again<br>';
+  $reply_msg = htmlspecialchars($_GET['reply'] ?? 'Incorrect username or password. Please try again.');
    
   print_header();
   print_body();
-
-  if ($_GET['reply']) {
-    print '<center>' . $_GET['reply'] . '</center>';
-  }
-   
+  // Show error hint above the login form
+  print '<p class="msg-err">⚠ ' . $reply_msg . '</p>';
   print_login_form();
   print_footer();
 
 }
 
 # 3: Logged out
-if ($_GET['res'] == logoff) {
+if ($_GET['res'] == 'logoff') {
 
   $result = 3;
   $titel = 'Logged out from HotSpot';
@@ -282,7 +308,7 @@ if ($_GET['res'] == logoff) {
 }
 
 # 4: Tried to login while already logged in
-if ($_GET['res'] == already) {
+if ($_GET['res'] == 'already') {
 
   $result = 4;
   $titel = 'Already logged in to HotSpot';
@@ -296,13 +322,11 @@ if ($_GET['res'] == already) {
 }
 
 # 5: Not logged in yet
-if ($_GET['res'] == notyet) {
+if ($_GET['res'] == 'notyet') {
 
   $result = 5;
-  $titel = 'Please login';
-  $headline = 'Please login to HotSpot';
-  $bodytext = 'Please login.<br>';
-   
+  $titel = 'Please Login';
+
   print_header();
   print_body();
   print_login_form();
@@ -311,7 +335,7 @@ if ($_GET['res'] == notyet) {
 }
 
 #11: Popup1
-if ($_GET['res'] == popup1) {
+if ($_GET['res'] == 'popup1') {
 
   $result = 11;
   $titel = 'Logging into HotSpot';
@@ -324,7 +348,7 @@ if ($_GET['res'] == popup1) {
 }
 
 #12: Popup2
-if ($_GET['res'] == popup2) {
+if ($_GET['res'] == 'popup2') {
 
   $result = 12;
   $titel = 'Logged in to HotSpot';
@@ -338,7 +362,7 @@ if ($_GET['res'] == popup2) {
 }
 
 #13: Popup3
-if ($_GET['res'] == popup3) {
+if ($_GET['res'] == 'popup3') {
 
   $result = 13;
   $titel = 'Logged out from HotSpot';
@@ -470,67 +494,136 @@ function print_header(){
       }
     }
   </script>";
+
+  // ── Dark glassmorphism CSS (consistent with register.php & admin.php) ──
+  print '
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    }
+    /* ── Main card ── */
+    .hs-card {
+      background: rgba(255,255,255,0.07);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      padding: 40px 36px 36px;
+      width: 380px;
+      backdrop-filter: blur(16px);
+      box-shadow: 0 8px 40px rgba(0,0,0,.45);
+      color: #e2e8f0;
+    }
+    /* ── Logo / title / subtitle ── */
+    .hs-logo  { text-align: center; font-size: 42px; margin-bottom: 6px; }
+    .hs-title {
+      text-align: center; font-size: 22px; font-weight: 700;
+      color: #fff; margin-bottom: 4px;
+    }
+    .hs-sub   { text-align: center; color: rgba(255,255,255,.4); font-size: 13px; margin-bottom: 28px; }
+    /* ── Login form ── */
+    .form-group { margin-bottom: 18px; }
+    .form-group label {
+      display: block; font-size: 11px; font-weight: 700; letter-spacing: .6px;
+      text-transform: uppercase; color: rgba(255,255,255,.5); margin-bottom: 7px;
+    }
+    .form-group input[type=text],
+    .form-group input[type=password] {
+      width: 100%; padding: 11px 14px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 10px; color: #e2e8f0; font-size: 15px;
+      outline: none; transition: border-color .2s;
+    }
+    .form-group input:focus { border-color: #74b9ff; }
+    input[type=submit] {
+      width: 100%; padding: 12px;
+      background: linear-gradient(135deg, #e94560, #c0392b);
+      color: #fff; border: none; border-radius: 10px;
+      font-size: 15px; font-weight: 700; cursor: pointer;
+      letter-spacing: .4px; transition: opacity .2s; margin-top: 4px;
+    }
+    input[type=submit]:hover { opacity: .88; }
+    /* ── Error message ── */
+    .msg-err {
+      color: #ff7090; font-size: 13px; text-align: center;
+      margin-bottom: 16px;
+      background: rgba(233,69,96,.12);
+      border: 1px solid rgba(233,69,96,.3);
+      border-radius: 8px; padding: 9px 14px;
+    }
+    /* ── Success page stat cards ── */
+    .stat-row {
+      display: flex; justify-content: space-between; align-items: flex-start;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 12px; padding: 14px 16px; margin-bottom: 14px;
+    }
+    .stat-label { font-size: 11px; color: rgba(255,255,255,.45); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+    .stat-val   { font-size: 22px; font-weight: 700; color: #fff; }
+    /* ── Traffic progress bar ── */
+    .prog-wrap { background: rgba(255,255,255,.1); border-radius: 6px; height: 6px; margin-top: 8px; overflow: hidden; }
+    .prog-bar  { height: 100%; border-radius: 6px; background: #00b894; transition: width .6s, background .4s; }
+    .prog-bar.warn   { background: #fdcb6e; }
+    .prog-bar.danger { background: #e17055; }
+    /* ── Buttons ── */
+    .btn-action {
+      display: block; width: 100%; padding: 13px;
+      border: none; border-radius: 12px; cursor: pointer;
+      font-size: 15px; font-weight: 700; letter-spacing: .3px;
+      text-align: center; text-decoration: none;
+      transition: opacity .2s; margin-top: 20px;
+    }
+    .btn-logout {
+      background: linear-gradient(135deg, #e94560, #c0392b); color: #fff;
+    }
+    .btn-action:hover { opacity: .88; }
+    /* ── Footer links ── */
+    .hs-links { text-align: center; margin-top: 22px; font-size: 13px; }
+    .hs-links a { color: rgba(255,255,255,.45); text-decoration: none; margin: 0 8px; }
+    .hs-links a:hover { color: #74b9ff; }
+  </style>';
 }
 
 function print_body(){
-  global $headline, $bodytext, $body_onload, $result, $loginpath;
-  
-  $uamip = $_GET['uamip'];
-  $uamport = $_GET['uamport'];
-  $userurl = $_GET['userurl'];
-  $redirurl = $_GET['redirurl'];
-  $userurldecode = $_GET['userurl'];
-  $redirurldecode = $_GET['redirurl'];
-  $timeleft = $_GET['timeleft'];
-  
-  print "
-  </head>
-    <body onLoad=\"javascript:doOnLoad($result, '$loginpath?res=popup2&uamip=$uamip&uamport=$uamport&userurl=$userurl&redirurl=$redirurl&timeleft=$timeleft','$userurldecode', '$redirurldecode', '$timeleft')\" onBlur = \"javascript:doOnBlur($result)\" bgColor = '#c0d8f4'>
-      <h1 style=\"text-align: center;\">$headline</h1>
-      <center>$bodytext</center><br>";
-
-# begin debugging
-#  print '<center>THE INPUT (for debugging):<br>';
-#
-#    foreach ($_GET as $key => $value) {
-#      print $key . '=' . $value . '<br>';
-#    }
-#
-#  print '<br></center>';
-# end debugging
-
+  // Dark theme: body + card wrapper opened here; closed by print_footer
+  print '</head><body><div class="hs-card">';
 }
 
 function print_login_form(){
   global $loginpath;
-  print '<FORM name="form1" METHOD="get" action="' . $loginpath . '?">
-          <INPUT TYPE="HIDDEN" NAME="chal" VALUE="' . $_GET['challenge'] . '">
-          <INPUT TYPE="HIDDEN" NAME="uamip" VALUE="' . $_GET['uamip'] . '">
-          <INPUT TYPE="HIDDEN" NAME="uamport" VALUE="' . $_GET['uamport'] . '">
-          <INPUT TYPE="HIDDEN" NAME="userurl" VALUE="' . $_GET['userurl'] . '">
-          <center>
-          <table border="0" cellpadding="5" cellspacing="0" style="width: 217px;">
-          <tbody>
-            <tr>
-              <td align="right">Username:</td>
-              <td><input type="text" name="UserName" size="20" maxlength="255"></td>
-            </tr>
-            <tr>
-              <td align="right">Password:</td>
-              <td><input type="password" name="Password" size="20" maxlength="255"></td>
-            </tr>
-            <tr>
-              <td align="center" colspan="2" height="23"><input type="submit" name="login" value="login"></td>
-          </tr>
-        </tbody>
-        </table>
-        </center>
-      </form>';
+  $challenge = htmlspecialchars($_GET['challenge'] ?? '', ENT_QUOTES);
+  $uamip     = htmlspecialchars($_GET['uamip']     ?? '', ENT_QUOTES);
+  $uamport   = htmlspecialchars($_GET['uamport']   ?? '', ENT_QUOTES);
+  $userurl   = htmlspecialchars($_GET['userurl']   ?? '', ENT_QUOTES);
+
+  print '
+    <div class="hs-logo">🛰</div>
+    <div class="hs-title">HotSpot Login</div>
+    <div class="hs-sub">Sign in to access the network</div>
+    <form name="form1" method="get" action="' . $loginpath . '?">
+      <input type="hidden" name="chal"     value="' . $challenge . '">
+      <input type="hidden" name="uamip"    value="' . $uamip . '">
+      <input type="hidden" name="uamport"  value="' . $uamport . '">
+      <input type="hidden" name="userurl"  value="' . $userurl . '">
+      <div class="form-group">
+        <label>Username</label>
+        <input type="text" name="UserName" maxlength="255" placeholder="Enter username" autofocus>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" name="Password" maxlength="255" placeholder="Enter password">
+      </div>
+      <input type="submit" name="login" value="Sign In →">
+    </form>';
 }
 
 function print_footer(){
   global $footer_text;
-  print $footer_text . '</body></html>';
+  // Close the card div opened by print_body, then footer links
+  print '<div class="hs-links">' . $footer_text . '</div>';
+  print '</div></body></html>';
   exit(0);
 }
 
