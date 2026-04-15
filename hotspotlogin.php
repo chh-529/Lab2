@@ -123,27 +123,39 @@ if ($_GET['res'] == 'success') {
   }
 
 
-  sleep(1); # Wait for acct to update
-  # Get data from acct
-  $sql = "SELECT acctstarttime, acctinputoctets, acctoutputoctets FROM radacct WHERE username = '" . $_GET['uid'] . "'";
-  $result = mysqli_query($db,$sql);
-  if (!$result) print 'unable';
-  $allRows = $result->num_rows;
-  $flow = 0;
-  $login_at = 0;
-  while ($row = mysqli_fetch_array($result)) {
-    $flow = $row['acctinputoctets'] + $row['acctoutputoctets'];
-    $login_at = $row['acctstarttime'];
-    # print '<h6>' . $login_at . '</h6>';
-  }
-  # print '<h6>' . $login_at . '</h6>';
+  // Fetch initial traffic and flow limit from DB (skipped in dev / no-DB mode)
+  $flow      = 0;
+  $login_at  = 0;
+  $flowLimit = 0;
+  if ($db) {
+    sleep(1); // Wait for accounting record to appear in radacct
+    $safe_uid = mysqli_real_escape_string($db, $_GET['uid'] ?? '');
 
-  
-  # Show time left
-  $sql = "SELECT value FROM radacct WHERE attribute = 'ChilliSpot-Max-Total-Octets'";
-  $result = mysqli_query($db,$sql);
-  $row = mysqli_fetch_array($result,MYSQLI_ASSOC);
-  $flowLimit = $row['value'];
+    // Bug fix #4: use += to accumulate across multiple session rows
+    $res_acc = mysqli_query($db, "SELECT acctstarttime, acctinputoctets, acctoutputoctets
+                                   FROM radacct WHERE username = '$safe_uid'
+                                   ORDER BY acctstarttime DESC");
+    while ($row = mysqli_fetch_array($res_acc)) {
+      $flow    += $row['acctinputoctets'] + $row['acctoutputoctets'];
+      $login_at = $row['acctstarttime'];
+    }
+
+    // Bug fix #2: query radreply (personal) first, fall back to radgroupreply (group)
+    $res_ul = mysqli_query($db, "SELECT value FROM radreply
+                                  WHERE username = '$safe_uid'
+                                    AND attribute = 'ChilliSpot-Max-Total-Octets'
+                                  LIMIT 1");
+    if ($res_ul && $rul = mysqli_fetch_assoc($res_ul)) {
+      $flowLimit = intval($rul['value']);
+    } else {
+      $res_gl = mysqli_query($db, "SELECT value FROM radgroupreply
+                                    WHERE attribute = 'ChilliSpot-Max-Total-Octets'
+                                    LIMIT 1");
+      if ($res_gl && $rgl = mysqli_fetch_assoc($res_gl)) {
+        $flowLimit = intval($rgl['value']);
+      }
+    }
+  }
   // print '<h3> Login at: <span id="loginat">' . $login_at .'</span> </h3>';
   // print '<h3> Access time: <span id="logintime"> 0 </span> / ' . $_GET['timeleft'] . ' seconds </h3>';
   // Show success page with live timer and traffic stats
@@ -283,25 +295,28 @@ if ($_GET['res'] == 'logoff') {
   print_body();
 
 
-  # Show traffic quota
-  # $sql = "SELECT id FROM radgroupreply WHERE attribute = 'ChilliSpot-Max-Total-Octets'";
-  $sql = "SELECT value FROM radgroupreply WHERE attribute = 'ChilliSpot-Max-Total-Octets'";
-  $result = mysqli_query($db,$sql);
-  $row = mysqli_fetch_array($result,MYSQLI_ASSOC);
-  $flowLimit = $row['value'];
+  // Fetch session summary from DB (skipped in dev / no-DB mode)
+  $flowLimit = 0;
+  $flow      = 0;
+  $sess      = 0;
+  if ($db) {
+    $res_gl = mysqli_query($db, "SELECT value FROM radgroupreply
+                                  WHERE attribute = 'ChilliSpot-Max-Total-Octets'
+                                  LIMIT 1");
+    if ($res_gl && $rgl = mysqli_fetch_assoc($res_gl)) {
+      $flowLimit = intval($rgl['value']);
+    }
 
-  $sql = "SELECT acctsessiontime, acctinputoctets, acctoutputoctets FROM radacct WHERE username =" . $_GET['UserName'];
-  $result = mysqli_query($db,$sql);
-  $allRows = $result->num_rows;
-  $flow = 0;
-  $sess = 0;
-  while ($row = mysqli_fetch_array($result)) {
-    $flow = $row['acctinputoctets'] + $row['acctoutputoctets'];
-    $sess = $row['acctsessiontime'];
+    // Bug fix #3: escape username + wrap in quotes to prevent SQL injection / syntax error
+    // Bug fix #4: use += to accumulate totals across multiple session rows
+    $safe_user = mysqli_real_escape_string($db, $_GET['UserName'] ?? '');
+    $result = mysqli_query($db, "SELECT acctsessiontime, acctinputoctets, acctoutputoctets
+                                  FROM radacct WHERE username = '$safe_user'");
+    while ($row = mysqli_fetch_array($result)) {
+      $flow += $row['acctinputoctets'] + $row['acctoutputoctets'];
+      $sess += intval($row['acctsessiontime']);
+    }
   }
-  # print '<h3> Access Time: ' . $flow . ' / ' . $flowLimit . ' seconds </h3>';
-  # print '<h3> Traffic : <span id="logintraffic">' . $flow . '  </span> / ' .  $flowLimit .  ' bytes </h3>';
-
 
   print_footer();
 
